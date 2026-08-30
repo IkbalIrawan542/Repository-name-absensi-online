@@ -18,7 +18,7 @@ loginBtnEl.onclick=async()=>{
   finally{loginBtnEl.disabled=false;loginBtnEl.textContent="Masuk"}
 };
 logoutEl.onclick=()=>F.signOut(F.auth);
-cancelEl.onclick=()=>modalEl.classList.add("hidden");
+cancelEl.onclick=()=>{selected="";modalEl.classList.add("hidden")};
 monthEl.onchange=load; yearEl.onchange=load; searchEl.oninput=load;
 
 function friendlyError(e){
@@ -107,7 +107,7 @@ function draw(em,rows){
   if(role==="admin")document.querySelectorAll("#schedule select").forEach(x=>x.onchange=async()=>{try{await F.setDoc(F.doc(F.db,"schedules",x.dataset.k),{employeeId:x.dataset.e,year:+yearEl.value,month:+monthEl.value,date:+x.dataset.d,status:x.value,updatedBy:uid,updatedAt:F.serverTimestamp()})}catch(e){alert("Gagal menyimpan: "+e.message)}});
 }
 
-window.requestDay=(d)=>{selected=`${yearEl.value}-${String(+monthEl.value+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;reqDateEl.textContent="Tanggal: "+selected;reasonEl.value="";modalEl.classList.remove("hidden")};
+window.requestDay=(d)=>{if(!uid||role!=="employee"){alert("Login sebagai akun karyawan terlebih dahulu.");return}selected=`${yearEl.value}-${String(+monthEl.value+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;reqDateEl.textContent="Tanggal: "+selected;reasonEl.value="";modalEl.classList.remove("hidden")};
 
 sendEl.onclick=async()=>{
   if(sendEl.disabled)return;
@@ -117,7 +117,7 @@ sendEl.onclick=async()=>{
     if(!selected){alert("Tanggal request belum dipilih.");return}
     sendEl.disabled=true;sendEl.textContent="Mengirim...";
     await F.addDoc(F.collection(F.db,"requests"),{employeeId:eid,date:selected,type:reqTypeEl.value,reason:reasonEl.value.trim(),status:"Pending",createdBy:uid,createdAt:F.serverTimestamp()});
-    modalEl.classList.add("hidden"); reasonEl.value=""; alert("Request berhasil terkirim.");
+    modalEl.classList.add("hidden"); selected=""; reasonEl.value=""; alert("Request berhasil terkirim.");
   }catch(e){alert("Gagal mengirim request: "+(e?.message||e))}
   finally{sendEl.disabled=false;sendEl.textContent="Kirim"}
 };
