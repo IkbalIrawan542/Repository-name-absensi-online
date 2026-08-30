@@ -46,7 +46,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:11px 8px;border-bottom:1
       <button id="loginBtn" class="btn full" type="submit">Masuk</button>
     </form>
     <div id="loginError" class="error"></div>
-    <div class="notice">Setelah login pertama kali, Employee ID akan dibuat otomatis dan disimpan ke akun Anda.</div>
+    <div class="notice">Setelah login pertama kali, Employee ID dibuat otomatis dari UID Firebase dan disimpan ke users/{UID}.</div>
   </div>
 </section>
 
@@ -153,40 +153,79 @@ function makeEmployeeId(uid) {
 }
 
 async function getOrCreateProfile(user) {
-  // Koleksi utama aplikasi: pengguna/{UID}
-  const ref = doc(db, "pengguna", user.uid);
-  const snap = await getDoc(ref);
+  // Profil karyawan disimpan di users/{UID}.
+  // Employee ID dibuat dari UID Firebase sehingga unik dan otomatis.
+  const ref = doc(db, "users", user.uid);
+  const employeeId = makeEmployeeId(user.uid);
 
-  if (snap.exists()) {
-    const data = snap.data();
-    let employeeId = data.employeeId || data.employeeID || data.employee_id || data.kodeKaryawan || "";
-    if (!employeeId) {
-      employeeId = makeEmployeeId(user.uid);
-      await setDoc(ref, {
-        employeeId,
+  try {
+    const snap = await getDoc(ref);
+
+    if (snap.exists()) {
+      const data = snap.data();
+      const existingEmployeeId =
+        data.employeeId || data.employeeID || data.employee_id ||
+        data.kodeKaryawan || employeeId;
+
+      // Jika profil lama belum memiliki Employee ID, tambahkan otomatis.
+      if (!data.employeeId) {
+        await setDoc(ref, {
+          employeeId: existingEmployeeId,
+          uid: user.uid,
+          email: user.email || "",
+          nama: data.nama || data.name ||
+                user.displayName ||
+                (user.email || "").split("@")[0],
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
+
+      return {
+        ...data,
+        uid: user.uid,
+        email: data.email || user.email || "",
+        nama: data.nama || data.name ||
+              user.displayName ||
+              (user.email || "").split("@")[0] ||
+              "Karyawan",
+        employeeId: existingEmployeeId,
+        role: data.role || data.jabatan || "Karyawan"
+      };
+    }
+
+    // Dokumen belum ada: buat otomatis saat login pertama.
+    const newProfile = {
+      uid: user.uid,
+      email: user.email || "",
+      nama: user.displayName ||
+            (user.email || "").split("@")[0] ||
+            "Karyawan",
+      employeeId,
+      role: "Karyawan",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    await setDoc(ref, newProfile, { merge: true });
+    return newProfile;
+
+  } catch (e) {
+    // Jangan membuat login gagal hanya karena profil belum bisa dibaca.
+    // Employee ID tetap dapat dihitung langsung dari UID untuk sesi ini.
+    if (e?.code === "permission-denied" || e?.code === "firestore/permission-denied") {
+      return {
         uid: user.uid,
         email: user.email || "",
-        nama: data.nama || data.name || user.displayName || (user.email || "").split("@")[0],
-        updatedAt: serverTimestamp()
-      }, {merge:true});
-      data.employeeId = employeeId;
+        nama: user.displayName ||
+              (user.email || "").split("@")[0] ||
+              "Karyawan",
+        employeeId,
+        role: "Karyawan",
+        profileWriteFailed: true
+      };
     }
-    return {...data, employeeId, uid:user.uid};
+    throw e;
   }
-
-  // Akun Firebase sudah ada tetapi dokumen profil belum ada.
-  const employeeId = makeEmployeeId(user.uid);
-  const newProfile = {
-    uid: user.uid,
-    email: user.email || "",
-    nama: user.displayName || (user.email || "").split("@")[0] || "Karyawan",
-    employeeId,
-    role: "Karyawan",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  };
-  await setDoc(ref, newProfile, {merge:true});
-  return newProfile;
 }
 
 async function loadRequests() {
@@ -265,7 +304,10 @@ window.sendRequest = async () => {
     await loadRequests();
     setTimeout(closeRequest,700);
   } catch (e) {
-    show("requestError","Gagal mengirim request: " + e.message);
+    show("requestError",
+      e?.code === "permission-denied"
+        ? "Request ditolak oleh Firestore Rules. Pastikan user yang login diizinkan membuat dokumen requests."
+        : "Gagal mengirim request: " + e.message);
   } finally {
     $("sendBtn").disabled = false;
   }
@@ -305,15 +347,21 @@ onAuthStateChanged(auth, async user => {
     $("app").style.display = "block";
     profile = await getOrCreateProfile(user);
     renderProfile();
+
+    if (profile.profileWriteFailed) {
+      show("loginError",
+        "Login berhasil. Employee ID sesi: " + profile.employeeId +
+        ". Simpan otomatis ke users/{UID} belum diizinkan oleh Firestore Rules.");
+    }
+
     await loadRequests();
     $("todayStatus").textContent = "Belum Absen";
   } catch (e) {
     $("auth").style.display = "flex";
     $("app").style.display = "none";
     show("loginError",
-      "Login berhasil, tetapi profil Firebase tidak dapat dibuat/dibaca. " +
-      "Periksa Firestore Rules. Detail: " + e.message);
-    await signOut(auth);
+      "Login berhasil, tetapi data akun gagal dimuat. " +
+      "Periksa Firebase Firestore/Rules. Detail: " + e.message);
   }
 });
 </script>
