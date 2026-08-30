@@ -1,6 +1,43 @@
-rules_version='2';service cloud.firestore{match /databases/{database}/documents{
-function signed(){return request.auth!=null} function me(){return get(/databases/$(database)/documents/users/$(request.auth.uid)).data} function admin(){return signed()&&me().role=="admin";}
-match /users/{id}{allow read:if signed()&&(request.auth.uid==id||admin());allow write:if admin();}
-match /schedules/{id}{allow read:if signed();allow write:if admin();}
-match /requests/{id}{allow read:if admin()||(signed()&&resource.data.createdBy==request.auth.uid);allow create:if signed()&&request.resource.data.createdBy==request.auth.uid;allow update,delete:if admin();}
-}}
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signed(){ return request.auth != null; }
+    function userDoc(){
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : get(/databases/$(database)/documents/pengguna/$(request.auth.uid)).data;
+    }
+    function admin(){ return signed() && (userDoc().role == "admin" || userDoc().Admin == "Administrator"); }
+    function validEmployeeId(){ return request.resource.data.employeeId is string && request.resource.data.employeeId.size() >= 4 && request.resource.data.employeeId.size() <= 40; }
+
+    match /users/{id} {
+      allow read: if signed() && (request.auth.uid == id || admin());
+      // Akun baru boleh membuat profil karyawan sendiri. Tidak boleh membuat admin.
+      allow create: if signed() && request.auth.uid == id
+        && request.resource.data.role == "employee"
+        && validEmployeeId();
+      // Pengguna hanya boleh melengkapi/mengubah identitas dasarnya sendiri.
+      allow update: if admin() || (signed() && request.auth.uid == id
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["employeeId", "name"])
+        && validEmployeeId());
+      allow delete: if admin();
+    }
+
+    match /pengguna/{id} {
+      allow read: if signed() && (request.auth.uid == id || admin());
+      allow write: if admin() || (signed() && request.auth.uid == id
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["employeeId", "name"])
+        && validEmployeeId());
+    }
+
+    match /schedules/{id} {
+      allow read: if signed();
+      allow write: if admin();
+    }
+    match /requests/{id} {
+      allow read: if admin() || (signed() && resource.data.createdBy == request.auth.uid);
+      allow create: if signed() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if admin();
+    }
+  }
+}
